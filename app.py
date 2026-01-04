@@ -27,6 +27,7 @@ async def root():
         "colab_server": COLAB_SERVER_URL,
         "endpoints": {
             "analyze": "/v1/analyze",
+            "embed": "/v1/embed",
             "health": "/health"
         }
     }
@@ -127,8 +128,71 @@ async def analyze_image(
         )
 
 @app.post("/v1/embed")
-
-
+async def embed_image(
+    file: UploadFile = File(...)
+):
+    """
+    Generate embeddings for an uploaded image using CLIP model on Colab server
+    
+    Args:
+        file: Image file to generate embeddings for
+    
+    Returns:
+        JSON response with embedding vector from CLIP model
+    """
+    try:
+        # Validate file type
+        if not file.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="File must be an image")
+        
+        print(f"Received image for embedding: {file.filename}")
+        print(f"Forwarding to Colab server: {COLAB_SERVER_URL}")
+        
+        # Read file content
+        file_content = await file.read()
+        
+        # Prepare files for forwarding
+        files = {
+            "file": (file.filename, file_content, file.content_type)
+        }
+        
+        # Forward request to Colab server
+        response = requests.post(
+            f"{COLAB_SERVER_URL}/v1/embed",
+            files=files,
+            timeout=60  # 60 second timeout for embedding generation
+        )
+        
+        # Check if request was successful
+        response.raise_for_status()
+        
+        # Return the response from Colab
+        result = response.json()
+        print(f"Embedding generated successfully, shape: {result.get('embedding_shape', 'N/A')}")
+        
+        return result
+        
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to Colab server at {COLAB_SERVER_URL}. "
+                   f"Make sure the server is running and COLAB_SERVER_URL is correct."
+        )
+    except requests.exceptions.Timeout:
+        raise HTTPException(
+            status_code=504,
+            detail="Request to Colab server timed out. The model might be loading."
+        )
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Colab server error: {response.text}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing request: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
