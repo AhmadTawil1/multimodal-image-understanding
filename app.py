@@ -28,6 +28,7 @@ async def root():
         "endpoints": {
             "analyze": "/v1/analyze",
             "embed": "/v1/embed",
+            "cosine_sim": "/v1/cosine-sim",
             "health": "/health"
         }
     }
@@ -169,6 +170,79 @@ async def embed_image(
         # Return the response from Colab
         result = response.json()
         print(f"Embedding generated successfully, shape: {result.get('embedding_shape', 'N/A')}")
+        
+        return result
+        
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Cannot connect to Colab server at {COLAB_SERVER_URL}. "
+                   f"Make sure the server is running and COLAB_SERVER_URL is correct."
+        )
+    except requests.exceptions.Timeout:
+        raise HTTPException(
+            status_code=504,
+            detail="Request to Colab server timed out. The model might be loading."
+        )
+    except requests.exceptions.HTTPError as e:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Colab server error: {response.text}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing request: {str(e)}"
+        )
+
+@app.post("/v1/cosine-sim")
+async def calculate_cosine_similarity(
+    file1: UploadFile = File(...),
+    file2: UploadFile = File(...)
+):
+    """
+    Calculate cosine similarity between two uploaded images using CLIP model on Colab server
+    
+    Args:
+        file1: First image file
+        file2: Second image file
+    
+    Returns:
+        JSON response with cosine similarity score from CLIP model
+    """
+    try:
+        # Validate file types
+        if not file1.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="File1 must be an image")
+        if not file2.content_type.startswith("image/"):
+            raise HTTPException(status_code=400, detail="File2 must be an image")
+        
+        print(f"Received images for similarity: {file1.filename} and {file2.filename}")
+        print(f"Forwarding to Colab server: {COLAB_SERVER_URL}")
+        
+        # Read file contents
+        file1_content = await file1.read()
+        file2_content = await file2.read()
+        
+        # Prepare files for forwarding
+        files = [
+            ("file1", (file1.filename, file1_content, file1.content_type)),
+            ("file2", (file2.filename, file2_content, file2.content_type))
+        ]
+        
+        # Forward request to Colab server
+        response = requests.post(
+            f"{COLAB_SERVER_URL}/v1/cosine-sim",
+            files=files,
+            timeout=60  # 60 second timeout for embedding generation and similarity calculation
+        )
+        
+        # Check if request was successful
+        response.raise_for_status()
+        
+        # Return the response from Colab
+        result = response.json()
+        print(f"Cosine similarity: {result.get('cosine_similarity', 'N/A')}")
         
         return result
         
